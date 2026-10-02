@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openbao
+  namespace: argocd
+  # finalizer ensures ArgoCD cleans up when app is deleted
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Replace with YOUR GitHub repo URL
+    repoURL: https://github.com/sassswa0733-coder/gitops-openbao.git
+    targetRevision: HEAD    # Always use latest commit
+
+    # Use Helm chart from a remote repo
+    # but override values from OUR Git repo
+    chart: openbao          # Helm chart name
+    helm:
+      releaseName: openbao
+      valueFiles:
+        - values.yaml       # Uses openbao/values.yaml from our repo
+
+  destination:
+    server: https://kubernetes.default.svc   # This cluster
+    namespace: openbao                        # Deploy into openbao namespace
+
+  syncPolicy:
+    automated:
+      prune: true      # Delete resources removed from Git
+      selfHeal: true   # Fix manual changes — Git is always truth
+    syncOptions:
+      - CreateNamespace=true   # Create openbao namespace if missing

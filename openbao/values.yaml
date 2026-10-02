@@ -1,0 +1,37 @@
+# OpenBao Helm values — managed by ArgoCD
+# To change any setting: edit this file and git push
+# ArgoCD will automatically apply the change
+
+server:
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+
+      listener "tcp" {
+        tls_disable = 1
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+
+      storage "raft" {
+        path    = "/openbao/data"
+        node_id = "openbao-0"
+      }
+
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+  dataStorage:
+    enabled: true
+    size: 1Gi
+    storageClass: standard
+
+ui:
+  enabled: true
+  serviceType: NodePort

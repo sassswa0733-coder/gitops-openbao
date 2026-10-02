@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myapp-config
+  namespace: myapp
+data:
+  VAULT_ADDR: "http://openbao.openbao.svc.cluster.local:8200"
+  VAULT_ROLE: "myapp-role"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: myapp-sa
+  namespace: myapp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+  namespace: myapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      serviceAccountName: myapp-sa
+      containers:
+      - name: myapp
+        image: curlimages/curl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "======================================"
+            echo "  App deployed by ArgoCD"
+            echo "  Secrets managed by OpenBao"
+            echo "======================================"
+            JWT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+            AUTH=$(curl -s -X POST "$VAULT_ADDR/v1/auth/kubernetes/login" \
+              -H "Content-Type: application/json" \
+              -d "{\"jwt\":\"$JWT\",\"role\":\"$VAULT_ROLE\"}")
+            TOKEN=$(echo $AUTH | grep -o '"client_token":"[^"]*"' | cut -d'"' -f4)
+            SECRET=$(curl -s -H "X-Vault-Token: $TOKEN" \
+              "$VAULT_ADDR/v1/secret/data/myapp/config")
+            DB_HOST=$(echo $SECRET | grep -o '"db_host":"[^"]*"' | cut -d'"' -f4)
+            echo "DB Host: $DB_HOST"
+            echo "SUCCESS: Secrets fetched via ArgoCD-deployed OpenBao!"
+            sleep 86400
+        envFrom:
+        - configMapRef:
+            name: myapp-config
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "64Mi"
+            cpu: "50m"
