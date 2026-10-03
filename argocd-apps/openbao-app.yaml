@@ -3,32 +3,37 @@ kind: Application
 metadata:
   name: openbao
   namespace: argocd
-  # finalizer ensures ArgoCD cleans up when app is deleted
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
 
-  source:
-    # Replace with YOUR GitHub repo URL
-    repoURL: https://github.com/sassswa0733-coder/gitops-openbao.git
-    targetRevision: HEAD    # Always use latest commit
+  # "sources" (plural) = combine Helm chart + Git values file
+  sources:
 
-    # Use Helm chart from a remote repo
-    # but override values from OUR Git repo
-    chart: openbao          # Helm chart name
-    helm:
-      releaseName: openbao
-      valueFiles:
-        - values.yaml       # Uses openbao/values.yaml from our repo
+    # Source 1: The actual OpenBao Helm chart from official repo
+    - repoURL: https://openbao.github.io/openbao-helm
+      chart: openbao
+      targetRevision: 0.30.0
+      helm:
+        releaseName: openbao
+        # Pull values from Source 2 (our Git repo)
+        valueFiles:
+          - $values/openbao/values.yaml
+
+    # Source 2: Our Git repo — only used for the values file
+    - repoURL: https://github.com/sassswa0733-coder/gitops-openbao.git
+      targetRevision: HEAD
+      ref: values    # Give this source the alias "values"
+                     # This is referenced above as $values
 
   destination:
-    server: https://kubernetes.default.svc   # This cluster
-    namespace: openbao                        # Deploy into openbao namespace
+    server: https://kubernetes.default.svc
+    namespace: openbao
 
   syncPolicy:
     automated:
-      prune: true      # Delete resources removed from Git
-      selfHeal: true   # Fix manual changes — Git is always truth
+      prune: true
+      selfHeal: true
     syncOptions:
-      - CreateNamespace=true   # Create openbao namespace if missing
+      - CreateNamespace=true

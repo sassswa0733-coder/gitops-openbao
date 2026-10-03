@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YOUR-USERNAME/gitops-openbao.git
+    repoURL: https://github.com/sassswa0733-coder/gitops-openbao.git
     targetRevision: HEAD
     path: myapp              # folder inside repo containing manifests
   destination:
