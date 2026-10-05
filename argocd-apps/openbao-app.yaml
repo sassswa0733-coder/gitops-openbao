@@ -8,28 +8,31 @@ metadata:
 spec:
   project: default
 
-  # "sources" (plural) = combine Helm chart + Git values file
   sources:
-
-    # Source 1: The actual OpenBao Helm chart from official repo
     - repoURL: https://openbao.github.io/openbao-helm
       chart: openbao
       targetRevision: 0.30.0
       helm:
         releaseName: openbao
-        # Pull values from Source 2 (our Git repo)
         valueFiles:
           - $values/openbao/values.yaml
 
-    # Source 2: Our Git repo — only used for the values file
     - repoURL: https://github.com/sassswa0733-coder/gitops-openbao.git
       targetRevision: HEAD
-      ref: values    # Give this source the alias "values"
-                     # This is referenced above as $values
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc
     namespace: openbao
+
+  # Tell ArgoCD to ignore the caBundle field
+  # This field is injected by Kubernetes at runtime
+  # ArgoCD cannot manage it — so we tell it to skip comparison
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
 
   syncPolicy:
     automated:
