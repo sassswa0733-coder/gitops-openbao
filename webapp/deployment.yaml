@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-config
+  namespace: myapp
+data:
+  VAULT_ADDR: "http://openbao.openbao.svc.cluster.local:8200"
+  VAULT_ROLE: "myapp-role"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: myapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      serviceAccountName: myapp-sa
+      containers:
+      - name: webapp
+        image: python:3.11-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            cat > /app.py << 'PYEOF'
+            import os, json, urllib.request
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+            VAULT_ADDR = os.environ.get("VAULT_ADDR")
+            VAULT_ROLE = os.environ.get("VAULT_ROLE")
+            try:
+                jwt = open("/var/run/secrets/kubernetes.io/serviceaccount/token").read()
+                data = json.dumps({"jwt": jwt, "role": VAULT_ROLE}).encode()
+                req = urllib.request.Request(f"{VAULT_ADDR}/v1/auth/kubernetes/login",
+                      data=data, headers={"Content-Type":"application/json"})
+                tok = json.loads(urllib.request.urlopen(req).read())["auth"]["client_token"]
+                req2 = urllib.request.Request(f"{VAULT_ADDR}/v1/secret/data/myapp/config",
+                       headers={"X-Vault-Token": tok})
+                s = json.loads(urllib.request.urlopen(req2).read())["data"]["data"]
+            except Exception as e:
+                s = {"error": str(e), "db_host": "FAILED", "db_port": "FAILED"}
+            class H(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.send_header("Content-type","text/html")
+                    self.end_headers()
+                    self.wfile.write(f"""<!DOCTYPE html><html><head><title>MyApp</title>
+                    <style>body{{font-family:Arial;background:#1a1a2e;color:#eee;
+                    display:flex;justify-content:center;align-items:center;height:100vh;margin:0}}
+                    .card{{background:#16213e;padding:40px;border-radius:12px;max-width:580px;width:100%}}
+                    h1{{color:#00d4aa}}.row{{margin:12px 0;padding:12px;background:#0f3460;
+                    border-radius:8px;display:flex;justify-content:space-between}}
+                    .v{{color:#00d4aa;font-weight:bold}}.h{{color:#f39c12}}</style></head>
+                    <body><div class="card"><h1>🔐 MyApp — Secured by OpenBao</h1>
+                    <p>✅ Secrets fetched at runtime — zero hardcoded credentials</p>
+                    <div class="row"><span>Database Host</span><span class="v">{s.get("db_host")}</span></div>
+                    <div class="row"><span>Database Port</span><span class="v">{s.get("db_port")}</span></div>
+                    <div class="row"><span>DB Password</span><span class="h">●●●●●●●● (hidden)</span></div>
+                    <div class="row"><span>API Key</span><span class="h">●●●●●●●● (hidden)</span></div>
+                    <p style="color:#666;font-size:0.8em;text-align:center">
+                    Deployed by ArgoCD | Secured by OpenBao v2.7.0</p>
+                    </div></body></html>""".encode())
+                def log_message(self,*a): pass
+            HTTPServer(("0.0.0.0",8080),H).serve_forever()
+            PYEOF
+            python /app.py
+        envFrom:
+        - configMapRef:
+            name: webapp-config
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+  namespace: myapp
+spec:
+  selector:
+    app: webapp
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP
