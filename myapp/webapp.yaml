@@ -7,6 +7,226 @@ data:
   VAULT_ADDR: "http://openbao.openbao.svc.cluster.local:8200"
   VAULT_ROLE: "myapp-role"
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-code
+  namespace: myapp
+data:
+  app.py: |
+    import os, json, urllib.request, time
+    from flask import Flask, jsonify
+
+    app = Flask(__name__)
+    VA = os.environ.get("VAULT_ADDR", "")
+    VR = os.environ.get("VAULT_ROLE", "")
+
+    def get_secrets():
+        jwt = open("/var/run/secrets/kubernetes.io/serviceaccount/token").read()
+        payload = json.dumps({"jwt": jwt, "role": VR}).encode()
+        req = urllib.request.Request(
+            VA + "/v1/auth/kubernetes/login",
+            data=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        resp = json.loads(urllib.request.urlopen(req).read())
+        vt  = resp["auth"]["client_token"]
+        ttl = resp["auth"]["lease_duration"]
+        req2 = urllib.request.Request(
+            VA + "/v1/secret/data/myapp/config",
+            headers={"X-Vault-Token": vt}
+        )
+        sr  = json.loads(urllib.request.urlopen(req2).read())
+        dd  = sr["data"]["data"]
+        ver = sr["data"]["metadata"]["version"]
+        return {
+            "db_host":     dd.get("db_host"),
+            "db_port":     dd.get("db_port"),
+            "db_password": dd.get("db_password"),
+            "api_key":     dd.get("api_key"),
+            "version":     ver,
+            "token_ttl":   ttl,
+            "fetched_at":  time.strftime("%Y-%m-%d %H:%M:%S UTC")
+        }
+
+    HTML = "\n".join([
+        "<!DOCTYPE html>",
+        "<html><head><meta charset='UTF-8'><title>MyApp - OpenBao</title>",
+        "<style>",
+        "* { box-sizing: border-box; margin: 0; padding: 0; }",
+        "body { font-family: Arial, sans-serif; background: #0d1117; color: #c9d1d9;",
+        "  min-height: 100vh; display: flex; align-items: center;",
+        "  justify-content: center; padding: 20px; }",
+        ".card { background: #161b22; border: 1px solid #30363d;",
+        "  border-radius: 16px; padding: 40px; max-width: 640px; width: 100%; }",
+        "h1 { color: #58a6ff; margin-bottom: 8px; }",
+        ".sub { color: #8b949e; font-size: .9em; margin-bottom: 24px; }",
+        ".flow { display: flex; align-items: center; justify-content: space-between;",
+        "  background: #0d1117; border: 1px solid #30363d; border-radius: 10px;",
+        "  padding: 14px; margin-bottom: 28px; text-align: center; }",
+        ".step { flex: 1; } .icon { font-size: 1.5em; }",
+        ".lbl { color: #8b949e; font-size: .78em; margin-top: 4px; }",
+        ".arr { color: #444; font-size: 1.1em; }",
+        ".btn { width: 100%; padding: 16px; font-size: 1.05em; font-weight: bold;",
+        "  background: #238636; color: #fff; border: none; border-radius: 10px;",
+        "  cursor: pointer; margin-bottom: 20px; }",
+        ".btn:hover { background: #2ea043; }",
+        ".btn:disabled { background: #21262d; color: #555; cursor: not-allowed; }",
+        "#loading { display: none; color: #58a6ff; text-align: center; margin: 10px 0; }",
+        "#result { display: none; }",
+        ".log { background: #0d1117; border: 1px solid #30363d; border-radius: 8px;",
+        "  padding: 14px; font-family: monospace; font-size: .82em;",
+        "  line-height: 2; margin-bottom: 14px; }",
+        ".ok { color: #3fb950; } .dim { color: #8b949e; }",
+        ".grid { display: grid; grid-template-columns: 1fr 1fr;",
+        "  gap: 10px; margin-bottom: 14px; }",
+        ".box { background: #0d1117; border: 1px solid #30363d;",
+        "  border-radius: 8px; padding: 12px; }",
+        ".lbl2 { color: #8b949e; font-size: .72em;",
+        "  text-transform: uppercase; margin-bottom: 4px; }",
+        ".val { color: #3fb950; font-weight: bold; }",
+        ".hid { color: #f0883e; font-weight: bold; }",
+        ".note { background: #1a1f2e; border: 1px solid #1f3a5f;",
+        "  border-radius: 8px; padding: 12px; font-size: .82em;",
+        "  color: #58a6ff; margin-top: 14px; }",
+        ".rh { display: flex; align-items: center; gap: 10px;",
+        "  margin-bottom: 14px; flex-wrap: wrap; }",
+        ".badge { padding: 3px 10px; border-radius: 20px;",
+        "  font-size: .75em; font-weight: bold; }",
+        ".b1 { background: #1a7f37; color: #3fb950; }",
+        ".b2 { background: #1f3a5f; color: #58a6ff; }",
+        ".err { color: #f85149; background: #2d1117;",
+        "  border: 1px solid #f85149; border-radius: 8px; padding: 14px; }",
+        ".srow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }",
+        ".rbtn { background: none; border: 1px solid #444; color: #8b949e;",
+        "  padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: .75em; }",
+        ".rbtn:hover { border-color: #58a6ff; color: #58a6ff; }",
+        ".foot { text-align: center; margin-top: 20px;",
+        "  color: #484f58; font-size: .75em; }",
+        "</style></head>",
+        "<body><div class='card'>",
+        "<div style='font-size:2em;margin-bottom:8px'>&#128272;</div>",
+        "<h1>MyApp &mdash; Secured by OpenBao</h1>",
+        "<p class='sub'>Deployed by ArgoCD &nbsp;|&nbsp; Secrets from OpenBao</p>",
+        "<div class='flow'>",
+        "  <div class='step'><div class='icon'>&#129370;</div>",
+        "    <div class='lbl'>Pod Identity<br>K8s Token</div></div>",
+        "  <span class='arr'>&rarr;</span>",
+        "  <div class='step'><div class='icon'>&#127963;</div>",
+        "    <div class='lbl'>OpenBao<br>Verifies</div></div>",
+        "  <span class='arr'>&rarr;</span>",
+        "  <div class='step'><div class='icon'>&#128477;</div>",
+        "    <div class='lbl'>Temp Token<br>1hr TTL</div></div>",
+        "  <span class='arr'>&rarr;</span>",
+        "  <div class='step'><div class='icon'>&#128451;</div>",
+        "    <div class='lbl'>Database<br>Connected</div></div>",
+        "</div>",
+        "<button class='btn' id='btn'>&#128451; Access Database</button>",
+        "<div id='loading'>&#9203; Authenticating with OpenBao...</div>",
+        "<div id='result'></div>",
+        "<div class='foot'>Zero hardcoded secrets &middot; Every click fetches LATEST version</div>",
+        "</div>",
+        "<script>",
+        "var S = {};",
+        "document.getElementById('btn').addEventListener('click', go);",
+        "document.addEventListener('click', function(e) {",
+        "  if (!e.target.classList.contains('rbtn')) return;",
+        "  var f  = e.target.getAttribute('data-field');",
+        "  var sp = document.getElementById('sv-' + f);",
+        "  if (e.target.textContent === 'Reveal') {",
+        "    sp.textContent = S[f]; sp.style.color = '#ff6b6b';",
+        "    e.target.textContent = 'Hide';",
+        "  } else {",
+        "    sp.textContent = '(hidden)'; sp.style.color = '#f0883e';",
+        "    e.target.textContent = 'Reveal';",
+        "  }",
+        "});",
+        "async function go() {",
+        "  var btn = document.getElementById('btn');",
+        "  var ld  = document.getElementById('loading');",
+        "  var res = document.getElementById('result');",
+        "  btn.disabled = true; btn.innerHTML = 'Connecting...';",
+        "  ld.style.display = 'block'; res.style.display = 'none';",
+        "  try {",
+        "    var r = await fetch('/api/connect');",
+        "    var d = await r.json();",
+        "    ld.style.display = 'none';",
+        "    if (d.error) {",
+        "      res.innerHTML = '<div class=\"err\"><b>Failed</b><br><code>'",
+        "                    + d.error + '</code></div>';",
+        "    } else {",
+        "      S['pw'] = d.db_password; S['ak'] = d.api_key;",
+        "      res.innerHTML =",
+        "         '<div class=\"rh\">'",
+        "        + '<span style=\"font-size:1.3em\">&#9989;</span>'",
+        "        + '<b style=\"color:#3fb950\">Database Connected</b>'",
+        "        + '<span class=\"badge b1\">LIVE</span>'",
+        "        + '<span class=\"badge b2\">Secret v' + d.version + '</span>'",
+        "        + '</div>'",
+        "        + '<div class=\"log\">'",
+        "        + '<div class=\"dim\">&rarr; Reading K8s identity token...</div>'",
+        "        + '<div class=\"ok\">&#10003; Token obtained</div>'",
+        "        + '<div class=\"dim\">&rarr; Authenticating with OpenBao...</div>'",
+        "        + '<div class=\"ok\">&#10003; Vault token issued &mdash; TTL: '",
+        "          + d.token_ttl + 's</div>'",
+        "        + '<div class=\"dim\">&rarr; Fetching secret/data/myapp/config...</div>'",
+        "        + '<div class=\"ok\">&#10003; Version <b>' + d.version",
+        "          + '</b> at ' + d.fetched_at + '</div>'",
+        "        + '<div class=\"dim\">&rarr; Connecting to database...</div>'",
+        "        + '<div class=\"ok\">&#10003; Connection established</div>'",
+        "        + '</div>'",
+        "        + '<div class=\"grid\">'",
+        "        + '<div class=\"box\"><div class=\"lbl2\">Database Host</div>'",
+        "        + '<div class=\"val\">' + d.db_host + '</div></div>'",
+        "        + '<div class=\"box\"><div class=\"lbl2\">Database Port</div>'",
+        "        + '<div class=\"val\">' + d.db_port + '</div></div>'",
+        "        + '<div class=\"box\"><div class=\"lbl2\">DB Password</div>'",
+        "        + '<div class=\"srow\">'",
+        "        + '<span id=\"sv-pw\" class=\"hid\">(hidden)</span>'",
+        "        + '<button class=\"rbtn\" data-field=\"pw\">Reveal</button>'",
+        "        + '</div></div>'",
+        "        + '<div class=\"box\"><div class=\"lbl2\">API Key</div>'",
+        "        + '<div class=\"srow\">'",
+        "        + '<span id=\"sv-ak\" class=\"hid\">(hidden)</span>'",
+        "        + '<button class=\"rbtn\" data-field=\"ak\">Reveal</button>'",
+        "        + '</div></div>'",
+        "        + '</div>'",
+        "        + '<div class=\"note\"><b>Rotate the secret:</b><br>'",
+        "        + '<code>bao kv put secret/myapp/config db_password=\"NewPass\"'",
+        "          + ' api_key=\"sk-new\" db_host=\"postgres.myapp.local\"'",
+        "          + ' db_port=\"5432\"</code><br>'",
+        "        + 'Click Connect Again to see version '",
+        "          + (d.version + 1) + '</div>';",
+        "    }",
+        "    res.style.display = 'block';",
+        "    btn.disabled = false;",
+        "    btn.innerHTML = '&#128260; Connect Again (fetches latest version)';",
+        "  } catch(e) {",
+        "    ld.style.display = 'none';",
+        "    res.innerHTML = '<div class=\"err\">Request failed: ' + e + '</div>';",
+        "    res.style.display = 'block';",
+        "    btn.disabled = false;",
+        "    btn.innerHTML = '&#128451; Access Database';",
+        "  }",
+        "}",
+        "</script></body></html>"
+    ])
+
+    @app.route("/")
+    def index():
+        return HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+    @app.route("/api/connect")
+    def api_connect():
+        try:
+            return jsonify(get_secrets())
+        except Exception as e:
+            return jsonify({"error": str(e)})
+
+    if __name__ == "__main__":
+        print("MyApp v5 started on port 8080")
+        app.run(host="0.0.0.0", port=8080, debug=False)
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,61 +247,34 @@ spec:
       - name: webapp
         image: python:3.11-alpine
         command: ["/bin/sh", "-c"]
-        args:
-          - |
-            cat > /app.py << 'PYEOF'
-            import os, json, urllib.request
-            from http.server import HTTPServer, BaseHTTPRequestHandler
-            VAULT_ADDR = os.environ.get("VAULT_ADDR")
-            VAULT_ROLE = os.environ.get("VAULT_ROLE")
-            try:
-                jwt = open("/var/run/secrets/kubernetes.io/serviceaccount/token").read()
-                data = json.dumps({"jwt": jwt, "role": VAULT_ROLE}).encode()
-                req = urllib.request.Request(f"{VAULT_ADDR}/v1/auth/kubernetes/login",
-                      data=data, headers={"Content-Type":"application/json"})
-                tok = json.loads(urllib.request.urlopen(req).read())["auth"]["client_token"]
-                req2 = urllib.request.Request(f"{VAULT_ADDR}/v1/secret/data/myapp/config",
-                       headers={"X-Vault-Token": tok})
-                s = json.loads(urllib.request.urlopen(req2).read())["data"]["data"]
-            except Exception as e:
-                s = {"error": str(e), "db_host": "FAILED", "db_port": "FAILED"}
-            class H(BaseHTTPRequestHandler):
-                def do_GET(self):
-                    self.send_response(200)
-                    self.send_header("Content-type","text/html")
-                    self.end_headers()
-                    self.wfile.write(f"""<!DOCTYPE html><html><head><title>MyApp</title>
-                    <style>body{{font-family:Arial;background:#1a1a2e;color:#eee;
-                    display:flex;justify-content:center;align-items:center;height:100vh;margin:0}}
-                    .card{{background:#16213e;padding:40px;border-radius:12px;max-width:580px;width:100%}}
-                    h1{{color:#00d4aa}}.row{{margin:12px 0;padding:12px;background:#0f3460;
-                    border-radius:8px;display:flex;justify-content:space-between}}
-                    .v{{color:#00d4aa;font-weight:bold}}.h{{color:#f39c12}}</style></head>
-                    <body><div class="card"><h1>🔐 MyApp — Secured by OpenBao</h1>
-                    <p>✅ Secrets fetched at runtime — zero hardcoded credentials</p>
-                    <div class="row"><span>Database Host</span><span class="v">{s.get("db_host")}</span></div>
-                    <div class="row"><span>Database Port</span><span class="v">{s.get("db_port")}</span></div>
-                    <div class="row"><span>DB Password</span><span class="h">●●●●●●●● (hidden)</span></div>
-                    <div class="row"><span>API Key</span><span class="h">●●●●●●●● (hidden)</span></div>
-                    <p style="color:#666;font-size:0.8em;text-align:center">
-                    Deployed by ArgoCD | Secured by OpenBao v2.7.0</p>
-                    </div></body></html>""".encode())
-                def log_message(self,*a): pass
-            HTTPServer(("0.0.0.0",8080),H).serve_forever()
-            PYEOF
-            python /app.py
-        envFrom:
-        - configMapRef:
-            name: webapp-config
+        args: ["pip install flask --quiet && python /code/app.py"]
+        env:
+        - name: VAULT_ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: webapp-config
+              key: VAULT_ADDR
+        - name: VAULT_ROLE
+          valueFrom:
+            configMapKeyRef:
+              name: webapp-config
+              key: VAULT_ROLE
+        volumeMounts:
+        - name: code
+          mountPath: /code
         ports:
         - containerPort: 8080
         resources:
           requests:
-            memory: "64Mi"
-            cpu: "50m"
-          limits:
             memory: "128Mi"
             cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: code
+        configMap:
+          name: webapp-code
 ---
 apiVersion: v1
 kind: Service
